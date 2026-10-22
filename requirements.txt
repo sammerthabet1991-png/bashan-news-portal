@@ -3,3 +3,4 @@ uvicorn
 feedparser
 jinja2
 python-multipart
+apscheduler
