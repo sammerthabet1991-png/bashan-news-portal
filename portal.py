@@ -176,6 +176,7 @@ def get_live_state():
     return state
 
 
+# --- 3. نظام لوحة التحكم للبث والشريط ---
 ADMIN_HTML = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -202,6 +203,7 @@ ADMIN_HTML = """
     <div style="margin-bottom: 15px;">
         <a href="/admin/fetch_now" class="btn btn-fetch" style="padding: 8px 16px; text-decoration: none; display: inline-block;">سحب الأخبار فوراً 🔄</a>
         <a href="/admin/approve_all" style="background: #2e7d32; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-right: 10px;">اعتماد كافة الأخبار التلقائية ✓✓</a>
+        <a href="/news/admin" style="background: #d4af37; color: black; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-right: 10px;">الانتقال لوحة إخبار الموقع 📰</a>
     </div>
     <div class="grid">
         <div>
@@ -488,6 +490,163 @@ def get_approved_news():
     finally:
         conn.close()
     return {"top": top_items, "bottom": bottom_items}
+
+
+# --- 4. الموقع الإخباري الاحترافي المتعدد اللغات (عربي، إنجليزي، عبري) ---
+
+PORTAL_HOME_HTML = """
+<!DOCTYPE html>
+<html dir="{{ 'rtl' if lang != 'en' else 'ltr' }}" lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <title>BASHAN NEWS PORTAL</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 0; }
+        header { background: #1e293b; border-bottom: 2px solid #3b82f6; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: #60a5fa; margin: 0; font-size: 24px; }
+        .lang-switch a { color: #fff; margin-left: 15px; text-decoration: none; padding: 5px 10px; background: #334155; border-radius: 4px; font-size: 14px; }
+        .lang-switch a.active { background: #3b82f6; font-weight: bold; }
+        .container { max-width: 1000px; margin: 30px auto; padding: 0 20px; }
+        .article-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .article-title { font-size: 20px; font-weight: bold; color: #38bdf8; margin-bottom: 10px; }
+        .article-meta { font-size: 12px; color: #94a3b8; margin-bottom: 15px; }
+        .article-content { font-size: 15px; line-height: 1.6; color: #cbd5e1; }
+        .admin-link { display: inline-block; margin-top: 20px; background: #d4af37; color: #000; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📰 BASHAN NEWS PORTAL</h1>
+        <div class="lang-switch">
+            <a href="/news?lang=ar" class="class_{{ 'active' if lang == 'ar' else '' }}">العربية</a>
+            <a href="/news?lang=en" class="class_{{ 'active' if lang == 'en' else '' }}">English</a>
+            <a href="/news?lang=he" class="class_{{ 'active' if lang == 'he' else '' }}">עברית</a>
+        </div>
+    </header>
+    <div class="container">
+        <h2 style="border-bottom: 2px solid #334155; padding-bottom: 10px;">
+            {% if lang == 'ar' %}أحدث الأخبار والمقالات{% elif lang == 'en' %}Latest News & Articles{% noqa %}חדשות ומאמרים אחרונים{% endif %}
+        </h2>
+        
+        {% if articles %}
+            {% for art in articles %}
+            <div class="article-card">
+                <div class="article-title">{{ art[1] }}</div>
+                <div class="article-meta">📂 {{ art[4] }} | 🕒 {{ art[6] or 'اليوم' }}</div>
+                <div class="article-content">{{ art[2] }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="text-align: center; color: #94a3b8; padding: 40px;">
+                {% if lang == 'ar' %}لا توجد مقالات منشورة حالياً. يرجى إضافتها من لوحة التحكم.{% elif lang == 'en' %}No articles available at the moment.{% else %}אין מאמרים זמינים כרגע.{% endif %}
+            </p>
+        {% endif %}
+        
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="/news/admin" class="admin-link">⚙️ لوحة إدارة الموقع الإخباري (Admin)</a>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+PORTAL_ADMIN_HTML = """
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>لوحة تحكم الموقع الإخباري</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 8px; border: 1px solid #334155; }
+        h1 { color: #d4af37; border-bottom: 2px solid #334155; padding-bottom: 10px; }
+        input, textarea, select { width: 100%; padding: 10px; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; box-sizing: border-box; margin-bottom: 15px; }
+        .btn { background: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; }
+        .btn:hover { background: #2563eb; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #38bdf8; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/news" class="back-link">← العودة إلى الموقع الإخباري</a>
+        <h1>⚙️ لوحة إضافة مقال جديد (متعدد اللغات)</h1>
+        <form action="/news/admin/add" method="post">
+            <label>العنوان بالعربية:</label>
+            <input type="text" name="title_ar" required>
+            
+            <label>المحتوى بالعربية:</label>
+            <textarea name="content_ar" rows="4" required></textarea>
+
+            <label>العنوان بالإنجليزية (Title EN):</label>
+            <input type="text" name="title_en">
+            
+            <label>المحتوى بالإنجليزية (Content EN):</label>
+            <textarea name="content_en" rows="3"></textarea>
+
+            <label>العنوان بالعبرية (Title HE):</label>
+            <input type="text" name="title_he">
+            
+            <label>المحتوى بالعبرية (Content HE):</label>
+            <textarea name="content_he" rows="3"></textarea>
+
+            <label>التصنيف:</label>
+            <input type="text" name="category" value="عام" required>
+
+            <button type="submit" class="btn">نشر المقال فوراً 🚀</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+@app.get("/news", response_class=HTMLResponse)
+def portal_home(lang: str = "ar"):
+    conn = sqlite3.connect(DB_PORTAL)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title_ar, content_ar, category, source_name, author, published_at FROM articles WHERE status='approved' ORDER BY id DESC")
+    raw_articles = cursor.fetchall()
+    conn.close()
+
+    articles = []
+    for art in raw_articles:
+        if lang == "en":
+            title = art[1] # يمكن تخصيصه لاحقاً لعرض title_en إذا توفر
+            content = art[2]
+        elif lang == "he":
+            title = art[1]
+            content = art[2]
+        else:
+            title = art[1]
+            content = art[2]
+        articles.append((art[0], title, content, art[3], art[4], art[5], art[6]))
+
+    return Template(PORTAL_HOME_HTML).render(articles=articles, lang=lang)
+
+@app.get("/news/admin", response_class=HTMLResponse)
+def portal_admin_page(username: str = Depends(verify_portal_admin)):
+    return HTMLResponse(PORTAL_ADMIN_HTML)
+
+@app.post("/news/admin/add")
+def portal_admin_add(
+    title_ar: str = Form(...),
+    content_ar: str = Form(...),
+    title_en: str = Form(""),
+    content_en: str = Form(""),
+    title_he: str = Form(""),
+    content_he: str = Form(""),
+    category: str = Form("عام"),
+    username: str = Depends(verify_portal_admin)
+):
+    conn = sqlite3.connect(DB_PORTAL)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO articles (title_ar, content_ar, title_en, content_en, title_he, content_he, category, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'approved')
+    """, (title_ar, content_ar, title_en, content_en, title_he, content_he, category))
+    conn.commit()
+    conn.close()
+    return HTMLResponse("<script>alert('تم نشر المقال بنجاح!'); window.location.href='/news';</script>")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
