@@ -83,14 +83,13 @@ def init_dbs():
             status TEXT DEFAULT 'approved'
         )''')
         
-        # مصادر RSS العالمية للموقع الإخباري
         cursor_p.execute('''CREATE TABLE IF NOT EXISTS portal_sources (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, url TEXT UNIQUE NOT NULL, category TEXT DEFAULT 'عالمي')''')
         default_portal_sources = [
-            ("BBC News Arabic", "https://feeds.bbci.co.uk/arabic/rss.xml", "عالمي"),
+            ("BBC News Arabic", "https://feeds.bbci.co.uk/arabic/rss.xml", "سياسة"),
             ("Sky News Arabia", "https://www.skynewsarabia.com/rss.xml", "عالمي"),
-            ("DW Arabic", "https://rss.dw.com/xml/rss-ar-all", "عالمي"),
-            ("France 24 Arabic", "https://www.france24.com/ar/rss", "عالمي"),
-            ("Reuters World (Google News)", "https://news.google.com/rss/search?q=site%3Areuters.com&hl=ar&gl=AE&ceid=AE%3Aar", "صحافة عالمية")
+            ("DW Arabic", "https://rss.dw.com/xml/rss-ar-all", "تقارير"),
+            ("France 24 Arabic", "https://www.france24.com/ar/rss", "أخبار"),
+            ("Reuters World", "https://news.google.com/rss/search?q=site%3Areuters.com&hl=ar&gl=AE&ceid=AE%3Aar", "اقتصاد")
         ]
         cursor_p.executemany("INSERT OR IGNORE INTO portal_sources (name, url, category) VALUES (?, ?, ?)", default_portal_sources)
         conn_p.commit()
@@ -99,7 +98,6 @@ def init_dbs():
         pass
 
 def fetch_portal_news():
-    # سحب أخبار الشريط (القاعدة القديمة)
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -109,8 +107,7 @@ def fetch_portal_news():
                 feed = feedparser.parse(url)
                 for entry in feed.entries[:5]:
                     title = str(getattr(entry, 'title', '') or '').strip()
-                    if not title:
-                        continue
+                    if not title: continue
                     cursor.execute("SELECT id FROM news WHERE title = ?", (title,))
                     if not cursor.fetchone():
                         cursor.execute("INSERT INTO news (title, category, source_name, status) VALUES (?, ?, ?, 'pending')", (title, category, name))
@@ -121,7 +118,6 @@ def fetch_portal_news():
     except Exception:
         pass
 
-    # سحب المقالات للموقع الإخباري الرئيسي (RSS تلقائي من الوكالات)
     try:
         conn_p = sqlite3.connect(DB_PORTAL)
         cursor_p = conn_p.cursor()
@@ -132,9 +128,8 @@ def fetch_portal_news():
                 for entry in feed.entries[:8]:
                     title = str(getattr(entry, 'title', '') or '').strip()
                     summary = str(getattr(entry, 'summary', '') or getattr(entry, 'description', '') or '').strip()
-                    published = str(getattr(entry, 'published', 'حديثاً')).strip()
-                    if not title:
-                        continue
+                    published = str(getattr(entry, 'published', 'منذ ساعة')).strip()
+                    if not title: continue
                     cursor_p.execute("SELECT id FROM articles WHERE title_ar = ?", (title,))
                     if not cursor_p.fetchone():
                         cursor_p.execute("""
@@ -166,175 +161,8 @@ def startup_event():
 
 @app.get("/logo.png")
 def get_logo():
-    if os.path.exists("logo.png"):
-        return FileResponse("logo.png")
+    if os.path.exists("logo.png"): return FileResponse("logo.png")
     return HTMLResponse(status_code=404)
-
-@app.get("/api/get_images")
-def get_images():
-    if os.path.exists(IMAGES_DIR):
-        return [f"/images/{f}" for f in os.listdir(IMAGES_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
-    return []
-
-@app.get("/api/get_songs")
-def get_songs():
-    if os.path.exists(UPLOAD_DIR):
-        return [f"/music/{f}" for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(('.mp3', '.wav', '.ogg', '.m4a'))]
-    return []
-
-@app.get("/api/get_videos")
-def get_videos():
-    if os.path.exists(VIDEOS_DIR):
-        return sorted([f"/videos/{f}" for f in os.listdir(VIDEOS_DIR) if f.lower().endswith(('.mp4', '.webm'))], key=str.lower)
-    return []
-
-@app.get("/api/live_state")
-def get_live_state():
-    state = CURRENT_STATE.copy()
-    state["server_time"] = time.time()
-    return state
-
-
-# --- 3. نظام لوحة التحكم للبث والشريط ---
-ADMIN_HTML = """
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-    <meta charset="UTF-8">
-    <title>BASHAN - لوحة تحكم البث المباشر</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #080b14; color: #eaeaea; margin: 0; padding: 20px; }
-        h1 { color: #d4af37; border-bottom: 2px solid #d4af37; padding-bottom: 10px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .card { background: #121824; padding: 20px; border-radius: 8px; border: 1px solid #1e293b; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 10px; text-align: right; border-bottom: 1px solid #1e293b; font-size: 13px; }
-        th { background: #1a2332; color: #d4af37; }
-        .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-left: 3px; }
-        .btn-approve { background: #2e7d32; color: white; }
-        .btn-reject { background: #c62828; color: white; }
-        .btn-fetch { background: #3b82f6; color: white; }
-        input, textarea, select { width: 100%; padding: 10px; background: #1a2332; color: #fff; border: 1px solid #2a364f; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px; }
-    </style>
-</head>
-<body>
-    <h1>BASHAN LINE — لوحة تحكم البث المباشر 🔒</h1>
-    <div style="margin-bottom: 15px;">
-        <a href="/admin/fetch_now" class="btn btn-fetch" style="padding: 8px 16px; text-decoration: none; display: inline-block;">سحب الأخبار فوراً 🔄</a>
-        <a href="/news/admin" style="background: #d4af37; color: black; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-right: 10px;">الانتقال لوحة إخبار الموقع 📰</a>
-    </div>
-    <div class="grid">
-        <div>
-            <div class="card" style="border: 2px solid #3b82f6;">
-                <h2 style="color: #60a5fa;">📺 وضع العرض السريع</h2>
-                <a href="/switch_to_images"><button class="btn" style="background:#3b82f6; color:#fff; width:31%; padding:10px;">عرض الصور 🖼️</button></a>
-                <a href="/switch_to_video"><button class="btn" style="background:#22c55e; color:#fff; width:31%; padding:10px;">الفيديو المحلي 🎬</button></a>
-                <a href="/admin/clear_stage"><button class="btn" style="background:#c62828; color:#fff; width:30%; padding:10px;">إيقاف الكل ❌</button></a>
-            </div>
-            <div class="card" style="border: 2px solid #ff0000;">
-                <h2 style="color: #ff4444;">▶️ رابط البث المباشر (يوتيوب)</h2>
-                <form action="/set_youtube_video" method="post">
-                    <input type="text" name="youtube_url" value="{{ current_youtube }}" placeholder="ضع رابط يوتيوب هنا..." required>
-                    <button type="submit" class="btn" style="background:#ff0000; color:#fff; width:100%;">تشغيل يوتيوب فوراً 🚀</button>
-                </form>
-            </div>
-        </div>
-        <div>
-            <div class="card" style="border: 2px solid #d4af37;">
-                <h2 style="color: #d4af37;">✍️ إضافة خبر جديد للشريط</h2>
-                <form action="/admin/add_ticker_news" method="post">
-                    <input type="text" name="title" placeholder="اكتب نص الخبر..." required>
-                    <input type="hidden" name="category" value="السويداء">
-                    <button type="submit" class="btn btn-approve" style="width:100%;">نشر مباشر 🚀</button>
-                </form>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-@app.get("/admin", response_class=HTMLResponse)
-def admin_panel(username: str = Depends(verify_admin)):
-    return HTMLResponse(ADMIN_HTML.replace("{{ current_youtube }}", CURRENT_STATE["youtube_url"]))
-
-@app.get("/admin/fetch_now")
-def fetch_now_endpoint(username: str = Depends(verify_admin)):
-    fetch_portal_news()
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-@app.post("/admin/add_ticker_news")
-def add_ticker_news(title: str = Form(...), category: str = Form(...), username: str = Depends(verify_admin)):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO news (title, category, source_name, status) VALUES (?, ?, 'لوحة البث', 'approved')", (title, category))
-    conn.commit()
-    conn.close()
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-@app.get("/switch_to_images")
-def switch_to_images(username: str = Depends(verify_admin)):
-    CURRENT_STATE["media_type"] = "image"
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-@app.get("/switch_to_video")
-def switch_to_video(username: str = Depends(verify_admin)):
-    CURRENT_STATE["media_type"] = "video"
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-@app.get("/admin/clear_stage")
-def clear_stage(username: str = Depends(verify_admin)):
-    CURRENT_STATE["media_type"] = "none"
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-@app.post("/set_youtube_video")
-def set_youtube_video(youtube_url: str = Form(...), username: str = Depends(verify_admin)):
-    CURRENT_STATE["media_type"] = "youtube"
-    CURRENT_STATE["youtube_url"] = youtube_url.strip()
-    return HTMLResponse("<script>window.location.href='/admin';</script>")
-
-
-# --- 4. واجهة شريط البث ---
-TICKER_HTML = """
-<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-    <meta charset="UTF-8">
-    <title>BASHAN LINE - البث المباشر</title>
-    <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #02040a; color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; overflow: hidden; }
-        .ticker-container { position: absolute; bottom: 0; left: 0; width: 100%; height: 50px; background: rgba(8, 11, 20, 0.98); border-top: 2px solid #d4af37; display: flex; align-items: center; z-index: 1000; }
-        .ticker-title { background: linear-gradient(135deg, #d4af37, #aa7c11); color: #000; padding: 0 15px; height: 100%; display: flex; align-items: center; font-weight: 900; font-size: 16px; white-space: nowrap; }
-        .ticker-wrap { width: 100%; overflow: hidden; white-space: nowrap; position: relative; }
-        .ticker-move { display: inline-block; white-space: nowrap; padding-right: 100%; font-size: 17px; color: #ffffff; animation: ticker 60s linear infinite; }
-        .ticker-item { display: inline-block; padding: 0 20px; }
-        @keyframes ticker { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(100%, 0, 0); } }
-    </style>
-</head>
-<body>
-    <div class="ticker-container">
-        <div class="ticker-title">أخبار عالمية</div>
-        <div class="ticker-wrap"><div class="ticker-move" id="ticker-content">جاري التحميل...</div></div>
-    </div>
-    <script>
-        async function updateTickers() {
-            try {
-                const res = await fetch('/api/approved_news');
-                const data = await res.json();
-                let html = data.bottom?.length ? data.bottom.map(i => `<span class="ticker-item">${i.title}</span> • `).join('') : '<span class="ticker-item">شبكة باشان الإعلامية</span> • ';
-                document.getElementById('ticker-content').innerHTML = html;
-            } catch(e){}
-        }
-        updateTickers();
-        setInterval(updateTickers, 10000);
-    </script>
-</body>
-</html>
-"""
-
-@app.get("/ticker", response_class=HTMLResponse)
-def get_ticker():
-    return TICKER_HTML
 
 @app.get("/api/approved_news")
 def get_approved_news():
@@ -349,56 +177,131 @@ def get_approved_news():
     return {"top": [], "bottom": bottom_items}
 
 
-# --- 5. الموقع الإخباري الاحترافي المتعدد اللغات مع السحب التلقائي (RSS) ---
+# --- 3. الموقع الإخباري الاحترافي (تصميم شبيه بالجزيرة نت) ---
 PORTAL_HOME_HTML = """
 <!DOCTYPE html>
 <html dir="{{ 'rtl' if lang != 'en' else 'ltr' }}" lang="{{ lang }}">
 <head>
     <meta charset="UTF-8">
-    <title>BASHAN NEWS PORTAL</title>
+    <title>BASHAN NEWS | شبكة باشان الإخبارية</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 0; }
-        header { background: #1e293b; border-bottom: 2px solid #3b82f6; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        h1 { color: #60a5fa; margin: 0; font-size: 24px; }
-        .lang-switch a { color: #fff; margin-left: 15px; text-decoration: none; padding: 5px 10px; background: #334155; border-radius: 4px; font-size: 14px; }
-        .lang-switch a.active { background: #3b82f6; font-weight: bold; }
-        .container { max-width: 1000px; margin: 30px auto; padding: 0 20px; }
-        .article-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .article-title { font-size: 20px; font-weight: bold; color: #38bdf8; margin-bottom: 10px; }
-        .article-meta { font-size: 12px; color: #94a3b8; margin-bottom: 15px; }
-        .article-content { font-size: 15px; line-height: 1.6; color: #cbd5e1; }
-        .admin-link { display: inline-block; margin-top: 20px; background: #d4af37; color: #000; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; }
+        body { font-family: 'Tahoma', Arial, sans-serif; background: #f3f4f6; color: #111827; margin: 0; padding: 0; }
+        /* شريط علوي شبيه بالجزيرة */
+        .top-bar { background: #b91c1c; color: white; padding: 8px 30px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+        .top-bar a { color: white; text-decoration: none; margin-left: 15px; }
+        
+        /* الهيدر الرئيسي */
+        header { background: #ffffff; border-bottom: 3px solid #b91c1c; padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .logo-area h1 { color: #b91c1c; margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -1px; }
+        .logo-area span { font-size: 13px; color: #4b5563; display: block; font-weight: normal; }
+        
+        .nav-links { display: flex; gap: 20px; font-weight: bold; font-size: 15px; }
+        .nav-links a { color: #374151; text-decoration: none; transition: color 0.2s; }
+        .nav-links a:hover { color: #b91c1c; }
+
+        .lang-switch a { background: #e5e7eb; color: #1f2937; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 12px; margin-left: 5px; }
+        .lang-switch a.active { background: #b91c1c; color: white; }
+
+        /* المحتوى الرئيسي */
+        .container { max-width: 1200px; margin: 25px auto; padding: 0 15px; }
+        
+        /* شبكة الأخبار البارزة */
+        .breaking-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 30px; }
+        .main-lead { background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-top: 4px solid #b91c1c; }
+        .main-lead img { width: 100%; height: 320px; object-fit: cover; }
+        .main-lead-content { padding: 20px; }
+        .main-lead-content h2 { font-size: 26px; margin: 0 0 10px 0; color: #1f2937; }
+        .main-lead-content p { color: #4b5563; line-height: 1.6; font-size: 15px; }
+
+        .side-news { display: flex; flex-direction: column; gap: 15px; }
+        .side-card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-right: 3px solid #b91c1c; }
+        .side-card h4 { margin: 0 0 8px 0; font-size: 16px; color: #1f2937; line-height: 1.4; }
+        
+        /* قائمة المقالات العامة */
+        .section-title { font-size: 20px; font-weight: bold; border-bottom: 2px solid #b91c1c; padding-bottom: 8px; margin-bottom: 20px; color: #1f2937; }
+        .articles-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .article-card { background: white; border-radius: 6px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; justify-content: space-between; }
+        .article-title { font-size: 18px; font-weight: bold; color: #1f2937; margin-bottom: 10px; line-height: 1.4; }
+        .article-meta { font-size: 12px; color: #9ca3af; border-top: 1px solid #f3f4f6; padding-top: 10px; margin-top: 10px; display: flex; justify-content: space-between; }
+        
+        .admin-btn { display: inline-block; background: #1f2937; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 14px; margin-top: 40px; }
     </style>
 </head>
 <body>
+
+    <div class="top-bar">
+        <div>🌍 شبكة باشان الإخبارية الشاملة — تغطية مستمرة على مدار الساعة</div>
+        <div>
+            <a href="/news/fetch_rss">🔄 تحديث الأخبار الآن</a>
+            <a href="/news/admin">⚙️ لوحة التحكم</a>
+        </div>
+    </div>
+
     <header>
-        <h1>📰 BASHAN NEWS PORTAL (Live RSS)</h1>
+        <div class="logo-area">
+            <h1>BASHAN NEWS</h1>
+            <span>باشان الإخبارية • المصدر الموثوق</span>
+        </div>
+        <div class="nav-links">
+            <a href="/news">الرئيسية</a>
+            <a href="/news?lang=ar">سياسة</a>
+            <a href="/news?lang=ar">اقتصاد</a>
+            <a href="/news?lang=ar">تقارير</a>
+        </div>
         <div class="lang-switch">
             <a href="/news?lang=ar" class="{{ 'active' if lang == 'ar' else '' }}">العربية</a>
             <a href="/news?lang=en" class="{{ 'active' if lang == 'en' else '' }}">English</a>
             <a href="/news?lang=he" class="{{ 'active' if lang == 'he' else '' }}">עברית</a>
         </div>
     </header>
+
     <div class="container">
-        <h2 style="border-bottom: 2px solid #334155; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-            <span>{% if lang == 'ar' %}أحدث الأخبار والوكالات العالمية{% elif lang == 'en' %}Latest Global News{% else %}חדשות עולמיות אחרונות{% endif %}</span>
-            <a href="/news/fetch_rss" style="font-size: 14px; background: #3b82f6; color: #fff; padding: 5px 12px; border-radius: 4px; text-decoration: none;">تحديث الأخبار الآن 🔄</a>
-        </h2>
         
+        <!-- الخبر الرئيسي والجانبي البارز -->
         {% if articles %}
-            {% for art in articles %}
+        <div class="breaking-grid">
+            <div class="main-lead">
+                <div class="main-lead-content">
+                    <span style="background: #b91c1c; color: white; padding: 3px 8px; font-size: 11px; border-radius: 3px; font-weight: bold;">عاجل / خبر رئيسي</span>
+                    <h2 style="margin-top: 10px;">{{ articles[0][1] }}</h2>
+                    <p>{{ articles[0][2] }}</p>
+                    <div style="font-size: 12px; color: #6b7280; margin-top: 15px;">🌐 المصدر: {{ articles[0][4] }} | 🕒 {{ articles[0][5] }}</div>
+                </div>
+            </div>
+            
+            <div class="side-news">
+                <h3 style="margin: 0; font-size: 16px; color: #b91c1c; border-bottom: 2px solid #b91c1c; padding-bottom: 5px;">أبرز العناوين</h3>
+                {% for art in articles[1:4] %}
+                <div class="side-card">
+                    <h4>{{ art[1] }}</h4>
+                    <span style="font-size: 11px; color: #9ca3af;">{{ art[4] }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- بقية المقالات والأخبار -->
+        <div class="section-title">أحدث التقارير والمقالات الإخبارية</div>
+        
+        <div class="articles-grid">
+            {% for art in articles[4:] %}
             <div class="article-card">
-                <div class="article-title">{{ art[1] }}</div>
-                <div class="article-meta">🌐 المصدر: {{ art[4] }} | 🕒 {{ art[5] or 'اليوم' }}</div>
-                <div class="article-content">{{ art[2] }}</div>
+                <div>
+                    <div style="font-size: 11px; color: #b91c1c; font-weight: bold; margin-bottom: 5px;">{{ art[3] }}</div>
+                    <div class="article-title">{{ art[1] }}</div>
+                    <p style="font-size: 13px; color: #4b5563; line-height: 1.5;">{{ art[2][:120] }}...</p>
+                </div>
+                <div class="article-meta">
+                    <span>{{ art[4] }}</span>
+                    <span>{{ art[5] }}</span>
+                </div>
             </div>
             {% endfor %}
-        {% else %}
-            <p style="text-align: center; color: #94a3b8; padding: 40px;">جاري سحب الأخبار من الوكالات...</p>
-        {% endif %}
-        
-        <div style="text-align: center; margin-top: 40px;">
-            <a href="/news/admin" class="admin-link">⚙️ لوحة إدارة الموقع الإخباري (Admin)</a>
+        </div>
+
+        <div style="text-align: center;">
+            <a href="/news/admin" class="admin-btn">⚙️ الدخول إلى لوحة إدارة الموقع الإخباري (Admin)</a>
         </div>
     </div>
 </body>
@@ -412,20 +315,20 @@ PORTAL_ADMIN_HTML = """
     <meta charset="UTF-8">
     <title>لوحة تحكم الموقع الإخباري</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 8px; border: 1px solid #334155; }
-        h1 { color: #d4af37; border-bottom: 2px solid #334155; padding-bottom: 10px; }
-        input, textarea { width: 100%; padding: 10px; background: #0f172a; color: #fff; border: 1px solid #475569; border-radius: 4px; box-sizing: border-box; margin-bottom: 15px; }
-        .btn { background: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; }
-        .back-link { display: inline-block; margin-bottom: 20px; color: #38bdf8; text-decoration: none; }
+        body { font-family: 'Tahoma', sans-serif; background: #f3f4f6; color: #1f2937; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #b91c1c; }
+        h1 { color: #b91c1c; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; margin-bottom: 15px; }
+        .btn { background: #b91c1c; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; }
+        .back-link { display: inline-block; margin-bottom: 20px; color: #b91c1c; text-decoration: none; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
-        <a href="/news" class="back-link">← العودة إلى الموقع الإخباري</a>
-        <h1>⚙️ لوحة إدارة الموقع الإخباري والسحب التلقائي</h1>
+        <a href="/news" class="back-link">← العودة إلى الموقع الإخباري الرئيسي</a>
+        <h1>⚙️ لوحة إدارة موقع باشان الإخباري</h1>
         <div style="margin-bottom: 20px;">
-            <a href="/news/fetch_rss" style="background: #2e7d32; color: #fff; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; display: inline-block;">سحب الأخبار من كافة الوكالات الآن 🔄</a>
+            <a href="/news/fetch_rss" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 5px; text-decoration: none; font-weight: bold; display: inline-block;">سحب الأخبار من الوكالات العالمية الآن 🔄</a>
         </div>
         <form action="/news/admin/add" method="post">
             <label>عنوان المقال:</label>
@@ -433,7 +336,7 @@ PORTAL_ADMIN_HTML = """
             <label>محتوى المقال:</label>
             <textarea name="content_ar" rows="4" required></textarea>
             <label>التصنيف:</label>
-            <input type="text" name="category" value="عام" required>
+            <input type="text" name="category" value="سياسة" required>
             <button type="submit" class="btn">نشر المقال يدوياً 🚀</button>
         </form>
     </div>
@@ -445,7 +348,7 @@ PORTAL_ADMIN_HTML = """
 def portal_home(lang: str = "ar"):
     conn = sqlite3.connect(DB_PORTAL)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title_ar, content_ar, category, source_name, published_at FROM articles WHERE status='approved' ORDER BY id DESC LIMIT 40")
+    cursor.execute("SELECT id, title_ar, content_ar, category, source_name, published_at FROM articles WHERE status='approved' ORDER BY id DESC LIMIT 30")
     articles = cursor.fetchall()
     conn.close()
     return Template(PORTAL_HOME_HTML).render(articles=articles, lang=lang)
@@ -463,14 +366,14 @@ def portal_admin_page(username: str = Depends(verify_portal_admin)):
 def portal_admin_add(
     title_ar: str = Form(...),
     content_ar: str = Form(...),
-    category: str = Form("عام"),
+    category: str = Form("سياسة"),
     username: str = Depends(verify_portal_admin)
 ):
     conn = sqlite3.connect(DB_PORTAL)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO articles (title_ar, content_ar, category, source_name, published_at, status)
-        VALUES (?, ?, ?, 'إدارة الموقع', 'اليوم', 'approved')
+        VALUES (?, ?, ?, 'إدارة الموقع', 'الآن', 'approved')
     """, (title_ar, content_ar, category))
     conn.commit()
     conn.close()
