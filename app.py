@@ -518,21 +518,21 @@ PORTAL_HOME_HTML = """
     <header>
         <h1>📰 BASHAN NEWS PORTAL</h1>
         <div class="lang-switch">
-            <a href="/news?lang=ar" class="class_{{ 'active' if lang == 'ar' else '' }}">العربية</a>
-            <a href="/news?lang=en" class="class_{{ 'active' if lang == 'en' else '' }}">English</a>
-            <a href="/news?lang=he" class="class_{{ 'active' if lang == 'he' else '' }}">עברית</a>
+            <a href="/news?lang=ar" class="{{ 'active' if lang == 'ar' else '' }}">العربية</a>
+            <a href="/news?lang=en" class="{{ 'active' if lang == 'en' else '' }}">English</a>
+            <a href="/news?lang=he" class="{{ 'active' if lang == 'he' else '' }}">עברית</a>
         </div>
     </header>
     <div class="container">
         <h2 style="border-bottom: 2px solid #334155; padding-bottom: 10px;">
-            {% if lang == 'ar' %}أحدث الأخبار والمقالات{% elif lang == 'en' %}Latest News & Articles{% noqa %}חדשות ומאמרים אחרונים{% endif %}
+            {% if lang == 'ar' %}أحدث الأخبار والمقالات{% elif lang == 'en' %}Latest News & Articles{% else %}חדשות ומאמרים אחרונים{% endif %}
         </h2>
         
         {% if articles %}
             {% for art in articles %}
             <div class="article-card">
                 <div class="article-title">{{ art[1] }}</div>
-                <div class="article-meta">📂 {{ art[4] }} | 🕒 {{ art[6] or 'اليوم' }}</div>
+                <div class="article-meta">📂 {{ art[3] }} | 🕒 {{ art[6] or 'اليوم' }}</div>
                 <div class="article-content">{{ art[2] }}</div>
             </div>
             {% endfor %}
@@ -610,7 +610,7 @@ def portal_home(lang: str = "ar"):
     articles = []
     for art in raw_articles:
         if lang == "en":
-            title = art[1] # يمكن تخصيصه لاحقاً لعرض title_en إذا توفر
+            title = art[1]
             content = art[2]
         elif lang == "he":
             title = art[1]
